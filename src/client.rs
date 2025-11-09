@@ -15,7 +15,7 @@ use magnum_opus::{Channels::*, Decoder as AudioDecoder};
 use ringbuf::{ring_buffer::RbBase, Rb};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     ffi::c_void,
     net::SocketAddr,
     ops::Deref,
@@ -100,6 +100,9 @@ pub const MILLI1: Duration = Duration::from_millis(1);
 pub const SEC30: Duration = Duration::from_secs(30);
 pub const VIDEO_QUEUE_SIZE: usize = 120;
 const MAX_DECODE_FAIL_COUNTER: usize = 3;
+
+const OPTION_CLIPBOARD_ALLOWED_SUFFIXES: &str = "clipboard-allowed-suffixes";
+const OPTION_CLIPBOARD_BLOCKED_SUFFIXES: &str = "clipboard-blocked-suffixes";
 
 #[cfg(target_os = "linux")]
 pub const LOGIN_MSG_DESKTOP_NOT_INITED: &str = "Desktop env is not inited";
@@ -1772,6 +1775,7 @@ pub struct LoginConfigHandler {
     pub enable_trusted_devices: bool,
     pub record_state: bool,
     pub record_permission: bool,
+    clipboard_conn_id: Option<i32>,
 }
 
 impl Deref for LoginConfigHandler {
@@ -1783,6 +1787,80 @@ impl Deref for LoginConfigHandler {
 }
 
 impl LoginConfigHandler {
+    fn parse_suffix_input(value: &str) -> Vec<String> {
+        value
+            .split(|c: char| c == ',' || c == ';' || c.is_whitespace())
+            .map(|s| s.trim().to_owned())
+            .collect()
+    }
+
+    fn sanitize_suffixes(list: Vec<String>) -> Vec<String> {
+        let mut seen = HashSet::new();
+        let mut sanitized = Vec::new();
+        for raw in list {
+            let mut item = raw.trim();
+            if item.is_empty() {
+                continue;
+            }
+            let is_wildcard = item == "*";
+            if !is_wildcard {
+                item = item.trim_start_matches('.');
+            }
+            if item.is_empty() && !is_wildcard {
+                continue;
+            }
+            let normalized = if is_wildcard {
+                "*".to_owned()
+            } else {
+                item.to_lowercase()
+            };
+            if seen.insert(normalized.clone()) {
+                sanitized.push(normalized);
+            }
+        }
+        sanitized
+    }
+
+    fn suffixes_to_string(list: &[String]) -> String {
+        list.join("\n")
+    }
+
+    fn suffixes_from_option(&self, key: &str) -> Vec<String> {
+        if let Some(value) = self.config.options.get(key) {
+            return Self::sanitize_suffixes(Self::parse_suffix_input(value));
+        }
+        let fallback = LocalConfig::get_option(key);
+        if fallback.is_empty() {
+            Vec::new()
+        } else {
+            Self::sanitize_suffixes(Self::parse_suffix_input(&fallback))
+        }
+    }
+
+    fn store_suffix_option(config: &mut PeerConfig, key: &str, suffixes: &[String]) {
+        if suffixes.is_empty() {
+            config.options.remove(key);
+        } else {
+            config
+                .options
+                .insert(key.to_owned(), Self::suffixes_to_string(suffixes));
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn sync_clipboard_file_suffix_policy(&self) {
+        if let Some(conn_id) = self.clipboard_conn_id {
+            crate::clipboard::set_clipboard_file_suffix_policy(
+                conn_id,
+                self.clipboard_allowed_file_suffixes(),
+                self.clipboard_blocked_file_suffixes(),
+            );
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn sync_clipboard_file_suffix_policy(&self) {}
+
     /// Initialize the login config handler.
     ///
     /// # Arguments
@@ -1925,6 +2003,15 @@ impl LoginConfigHandler {
     /// * `v` - value of option
     pub fn set_option(&mut self, k: String, v: String) {
         let mut config = self.load_config();
+        if k == OPTION_CLIPBOARD_ALLOWED_SUFFIXES
+            || k == OPTION_CLIPBOARD_BLOCKED_SUFFIXES
+        {
+            let suffixes = Self::sanitize_suffixes(Self::parse_suffix_input(&v));
+            Self::store_suffix_option(&mut config, &k, &suffixes);
+            self.save_config(config);
+            self.sync_clipboard_file_suffix_policy();
+            return;
+        }
         if v == self.get_option(&k) {
             return;
         }
@@ -2324,6 +2411,32 @@ impl LoginConfigHandler {
         }
         msg.supported_decoding = MessageField::some(self.get_supported_decoding());
         Some(msg)
+    }
+
+    pub fn clipboard_allowed_file_suffixes(&self) -> Vec<String> {
+        self.suffixes_from_option(OPTION_CLIPBOARD_ALLOWED_SUFFIXES)
+    }
+
+    pub fn clipboard_blocked_file_suffixes(&self) -> Vec<String> {
+        self.suffixes_from_option(OPTION_CLIPBOARD_BLOCKED_SUFFIXES)
+    }
+
+    pub fn set_clipboard_conn_id(&mut self, conn_id: i32) {
+        self.clipboard_conn_id = Some(conn_id);
+        self.sync_clipboard_file_suffix_policy();
+    }
+
+    pub fn set_clipboard_file_suffix_policy(
+        &mut self,
+        allowed: Vec<String>,
+        blocked: Vec<String>,
+    ) {
+        let allowed = Self::sanitize_suffixes(allowed);
+        let blocked = Self::sanitize_suffixes(blocked);
+        Self::store_suffix_option(&mut self.config, OPTION_CLIPBOARD_ALLOWED_SUFFIXES, &allowed);
+        Self::store_suffix_option(&mut self.config, OPTION_CLIPBOARD_BLOCKED_SUFFIXES, &blocked);
+        self.config.store(&self.id);
+        self.sync_clipboard_file_suffix_policy();
     }
 
     pub fn get_supported_decoding(&self) -> SupportedDecoding {

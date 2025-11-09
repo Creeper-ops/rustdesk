@@ -1,3 +1,5 @@
+use std::collections::{HashMap, HashSet};
+use std::path::Path;
 use std::sync::{Arc, Mutex, RwLock};
 
 #[cfg(any(
@@ -150,6 +152,19 @@ lazy_static::lazy_static! {
     static ref CLIENT_CONN_ID_COUNTER: Mutex<i32> = Mutex::new(0);
 }
 
+#[cfg(target_os = "windows")]
+#[derive(Default, Clone)]
+struct ClipboardFileSuffixPolicy {
+    allowed: Vec<String>,
+    blocked: Vec<String>,
+}
+
+#[cfg(target_os = "windows")]
+lazy_static::lazy_static! {
+    static ref CLIPBOARD_FILE_POLICIES: RwLock<HashMap<i32, ClipboardFileSuffixPolicy>> =
+        Default::default();
+}
+
 impl ClipboardFile {
     pub fn is_stopping_allowed(&self) -> bool {
         matches!(
@@ -181,6 +196,119 @@ fn get_conn_id() -> i32 {
     let mut lock = CLIENT_CONN_ID_COUNTER.lock().unwrap();
     *lock += 1;
     *lock
+}
+
+#[cfg(target_os = "windows")]
+fn sanitize_suffix_list(list: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut sanitized = Vec::new();
+    for raw in list {
+        let mut item = raw.trim();
+        if item.is_empty() {
+            continue;
+        }
+        let mut has_wildcard = false;
+        if item == "*" {
+            has_wildcard = true;
+        }
+        if !has_wildcard {
+            item = item.trim_start_matches('.');
+        }
+        if item.is_empty() && !has_wildcard {
+            continue;
+        }
+        let normalized = if has_wildcard {
+            "*".to_owned()
+        } else {
+            item.to_lowercase()
+        };
+        if seen.insert(normalized.clone()) {
+            sanitized.push(normalized);
+        }
+    }
+    sanitized
+}
+
+#[cfg(target_os = "windows")]
+fn get_policy(conn_id: i32) -> ClipboardFileSuffixPolicy {
+    CLIPBOARD_FILE_POLICIES
+        .read()
+        .unwrap()
+        .get(&conn_id)
+        .cloned()
+        .unwrap_or_default()
+}
+
+#[cfg(target_os = "windows")]
+pub fn set_clipboard_file_suffix_policy(conn_id: i32, allowed: Vec<String>, blocked: Vec<String>) {
+    let mut lock = CLIPBOARD_FILE_POLICIES.write().unwrap();
+    let policy = ClipboardFileSuffixPolicy {
+        allowed: sanitize_suffix_list(allowed),
+        blocked: sanitize_suffix_list(blocked),
+    };
+    if policy.allowed.is_empty() && policy.blocked.is_empty() {
+        lock.remove(&conn_id);
+    } else {
+        lock.insert(conn_id, policy);
+    }
+}
+
+#[cfg(target_os = "windows")]
+pub fn clear_clipboard_file_suffix_policy(conn_id: i32) {
+    CLIPBOARD_FILE_POLICIES.write().unwrap().remove(&conn_id);
+}
+
+#[cfg(target_os = "windows")]
+pub fn is_clipboard_file_suffix_allowed(conn_id: i32, path: &str) -> bool {
+    let policy = get_policy(conn_id);
+    if policy.allowed.is_empty() && policy.blocked.is_empty() {
+        return true;
+    }
+    let extension = Path::new(path)
+        .extension()
+        .and_then(|s| s.to_str())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_lowercase())
+        .unwrap_or_default();
+
+    let mut blocked = false;
+    for suffix in &policy.blocked {
+        if suffix == "*" {
+            blocked = true;
+            break;
+        }
+        if *suffix == extension {
+            blocked = true;
+            break;
+        }
+    }
+    if blocked {
+        return false;
+    }
+    if policy.allowed.is_empty() {
+        return true;
+    }
+    if policy.allowed.iter().any(|s| s == "*") {
+        return true;
+    }
+    policy.allowed.iter().any(|s| *s == extension)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn set_clipboard_file_suffix_policy(
+    _conn_id: i32,
+    _allowed: Vec<String>,
+    _blocked: Vec<String>,
+) {
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn clear_clipboard_file_suffix_policy(_conn_id: i32) {}
+
+#[cfg(not(target_os = "windows"))]
+pub fn is_clipboard_file_suffix_allowed(_conn_id: i32, _path: &str) -> bool {
+    true
 }
 
 pub fn get_rx_cliprdr_client(
@@ -231,6 +359,8 @@ pub fn remove_channel_by_conn_id(conn_id: i32) {
     if let Some(index) = lock.iter().position(|x| x.conn_id == conn_id) {
         lock.remove(index);
     }
+    #[cfg(target_os = "windows")]
+    clear_clipboard_file_suffix_policy(conn_id);
 }
 
 #[cfg(any(target_os = "windows", feature = "unix-file-copy-paste"))]
