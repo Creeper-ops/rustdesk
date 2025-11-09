@@ -699,6 +699,38 @@ impl UI {
     fn get_builtin_option(&self, key: String) -> String {
         crate::ui_interface::get_builtin_option(&key)
     }
+
+    fn get_clipboard_allow_regex(&self) -> String {
+        #[cfg(target_os = "windows")]
+        {
+            return LocalConfig::get_clipboard_allow_regex();
+        }
+        #[allow(unreachable_code)]
+        String::new()
+    }
+
+    fn set_clipboard_allow_regex(&self, value: String) {
+        #[cfg(target_os = "windows")]
+        {
+            LocalConfig::set_clipboard_allow_regex(value);
+        }
+    }
+
+    fn get_clipboard_block_regex(&self) -> String {
+        #[cfg(target_os = "windows")]
+        {
+            return LocalConfig::get_clipboard_block_regex();
+        }
+        #[allow(unreachable_code)]
+        String::new()
+    }
+
+    fn set_clipboard_block_regex(&self, value: String) {
+        #[cfg(target_os = "windows")]
+        {
+            LocalConfig::set_clipboard_block_regex(value);
+        }
+    }
 }
 
 impl sciter::EventHandler for UI {
@@ -759,6 +791,10 @@ impl sciter::EventHandler for UI {
         fn get_local_option(String);
         fn set_local_option(String, String);
         fn get_peer_option(String, String);
+        fn get_clipboard_allow_regex();
+        fn set_clipboard_allow_regex(String);
+        fn get_clipboard_block_regex();
+        fn set_clipboard_block_regex(String);
         fn peer_has_password(String);
         fn forget_password(String);
         fn set_peer_option(String, String, String);

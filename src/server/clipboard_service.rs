@@ -6,6 +6,8 @@ pub use crate::clipboard::{check_clipboard, ClipboardContext, ClipboardSide};
 pub use crate::clipboard::{CLIPBOARD_INTERVAL as INTERVAL, CLIPBOARD_NAME as NAME};
 #[cfg(windows)]
 use crate::ipc::{self, ClipboardFile, ClipboardNonFile, Data};
+#[cfg(target_os = "windows")]
+use crate::clipboard::ClipboardRegexConfig;
 #[cfg(feature = "unix-file-copy-paste")]
 pub use crate::{
     clipboard::{check_clipboard_files, FILE_CLIPBOARD_NAME as FILE_NAME},
@@ -17,6 +19,8 @@ use clipboard::platform::unix::fuse::{init_fuse_context, uninit_fuse_context};
 use clipboard_master::CallbackResult;
 #[cfg(target_os = "android")]
 use hbb_common::config::{keys, option2bool};
+#[cfg(target_os = "windows")]
+use hbb_common::config::LocalConfig;
 #[cfg(target_os = "android")]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
@@ -172,6 +176,21 @@ impl Handler {
             }
         }
 
+        #[cfg(target_os = "windows")]
+        {
+            let filters = ClipboardRegexConfig::from_patterns(
+                LocalConfig::get_clipboard_allow_regex(),
+                LocalConfig::get_clipboard_block_regex(),
+            );
+            return check_clipboard(
+                &mut self.ctx,
+                ClipboardSide::Host,
+                false,
+                filters.as_ref(),
+            );
+        }
+
+        #[cfg(not(target_os = "windows"))]
         check_clipboard(&mut self.ctx, ClipboardSide::Host, false)
     }
 

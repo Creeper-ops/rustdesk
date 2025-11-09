@@ -1,5 +1,7 @@
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::clipboard::{update_clipboard, ClipboardSide};
+#[cfg(target_os = "windows")]
+use crate::clipboard::{clipboards_allowed, ClipboardRegexConfig};
 #[cfg(not(any(target_os = "ios")))]
 use crate::{audio_service, clipboard::CLIPBOARD_INTERVAL, ConnInner, CLIENT_SERVER};
 use crate::{
@@ -1422,7 +1424,24 @@ impl<T: InvokeUiSession> Remote<T> {
                     self.handler.set_cursor_position(cp);
                 }
                 Some(message::Union::Clipboard(cb)) => {
-                    if !self.handler.lc.read().unwrap().disable_clipboard.v {
+                    let disabled;
+                    #[cfg(target_os = "windows")]
+                    let filters;
+                    {
+                        let guard = self.handler.lc.read().unwrap();
+                        disabled = guard.disable_clipboard.v;
+                        #[cfg(target_os = "windows")]
+                        {
+                            filters = guard.clipboard_regex_config();
+                        }
+                    }
+                    if !disabled {
+                        #[cfg(target_os = "windows")]
+                        {
+                            if !clipboards_allowed(&[cb.clone()], filters.as_ref()) {
+                                continue;
+                            }
+                        }
                         #[cfg(not(any(target_os = "android", target_os = "ios")))]
                         update_clipboard(vec![cb], ClipboardSide::Client);
                         #[cfg(target_os = "ios")]
@@ -1441,7 +1460,24 @@ impl<T: InvokeUiSession> Remote<T> {
                     }
                 }
                 Some(message::Union::MultiClipboards(_mcb)) => {
-                    if !self.handler.lc.read().unwrap().disable_clipboard.v {
+                    let disabled;
+                    #[cfg(target_os = "windows")]
+                    let filters;
+                    {
+                        let guard = self.handler.lc.read().unwrap();
+                        disabled = guard.disable_clipboard.v;
+                        #[cfg(target_os = "windows")]
+                        {
+                            filters = guard.clipboard_regex_config();
+                        }
+                    }
+                    if !disabled {
+                        #[cfg(target_os = "windows")]
+                        {
+                            if !clipboards_allowed(&_mcb.clipboards, filters.as_ref()) {
+                                continue;
+                            }
+                        }
                         #[cfg(not(any(target_os = "android", target_os = "ios")))]
                         update_clipboard(_mcb.clipboards, ClipboardSide::Client);
                         #[cfg(target_os = "android")]

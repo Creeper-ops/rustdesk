@@ -1,6 +1,8 @@
 #[cfg(not(target_os = "android"))]
 use arboard::{ClipboardData, ClipboardFormat};
 use hbb_common::{bail, log, message_proto::*, ResultType};
+#[cfg(target_os = "windows")]
+use hbb_common::regex::Regex;
 use std::{
     sync::{Arc, Mutex},
     time::Duration,
@@ -48,11 +50,90 @@ const SUPPORTED_FORMATS: &[ClipboardFormat] = &[
     ClipboardFormat::Special(RUSTDESK_CLIPBOARD_OWNER_FORMAT),
 ];
 
+#[cfg(target_os = "windows")]
+#[derive(Clone, Default)]
+pub struct ClipboardRegexConfig {
+    allow: Option<String>,
+    block: Option<String>,
+}
+
+#[cfg(target_os = "windows")]
+impl ClipboardRegexConfig {
+    pub fn from_patterns(allow: String, block: String) -> Option<Self> {
+        let allow = allow.trim().to_owned();
+        let block = block.trim().to_owned();
+        if allow.is_empty() && block.is_empty() {
+            return None;
+        }
+        Some(Self {
+            allow: if allow.is_empty() { None } else { Some(allow) },
+            block: if block.is_empty() { None } else { Some(block) },
+        })
+    }
+
+    fn compile(&self) -> Option<CompiledClipboardRegex> {
+        let allow = self
+            .allow
+            .as_ref()
+            .and_then(|pattern| compile_regex(pattern, "allow"));
+        let block = self
+            .block
+            .as_ref()
+            .and_then(|pattern| compile_regex(pattern, "block"));
+        if allow.is_none() && block.is_none() {
+            None
+        } else {
+            Some(CompiledClipboardRegex { allow, block })
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+struct CompiledClipboardRegex {
+    allow: Option<Regex>,
+    block: Option<Regex>,
+}
+
+#[cfg(target_os = "windows")]
+impl CompiledClipboardRegex {
+    fn allows(&self, text: &str) -> bool {
+        if let Some(re) = &self.allow {
+            if !re.is_match(text) {
+                return false;
+            }
+        }
+        if let Some(re) = &self.block {
+            if re.is_match(text) {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn compile_regex(pattern: &str, kind: &str) -> Option<Regex> {
+    match Regex::new(pattern) {
+        Ok(regex) => Some(regex),
+        Err(err) => {
+            log::warn!(
+                "Invalid clipboard {} regex pattern '{}': {}",
+                kind,
+                pattern,
+                err
+            );
+            None
+        }
+    }
+}
+
 #[cfg(not(target_os = "android"))]
 pub fn check_clipboard(
     ctx: &mut Option<ClipboardContext>,
     side: ClipboardSide,
     force: bool,
+    #[cfg(target_os = "windows")]
+    filters: Option<&ClipboardRegexConfig>,
 ) -> Option<Message> {
     if ctx.is_none() {
         *ctx = ClipboardContext::new().ok();
@@ -61,6 +142,12 @@ pub fn check_clipboard(
     match ctx2.get(side, force) {
         Ok(content) => {
             if !content.is_empty() {
+                #[cfg(target_os = "windows")]
+                {
+                    if !should_allow_clipboard_text(&content, filters) {
+                        return None;
+                    }
+                }
                 let mut msg = Message::new();
                 let clipboards = proto::create_multi_clipboards(content);
                 msg.set_multi_clipboards(clipboards.clone());
@@ -73,6 +160,28 @@ pub fn check_clipboard(
         }
     }
     None
+}
+
+#[cfg(target_os = "windows")]
+fn should_allow_clipboard_text(
+    content: &[ClipboardData],
+    filters: Option<&ClipboardRegexConfig>,
+) -> bool {
+    let Some(filters) = filters else {
+        return true;
+    };
+    let Some(compiled) = filters.compile() else {
+        return true;
+    };
+    for item in content {
+        if let ClipboardData::Text(text) = item {
+            if !compiled.allows(text) {
+                log::debug!("Clipboard text filtered by configured regex rules");
+                return false;
+            }
+        }
+    }
+    true
 }
 
 #[cfg(all(feature = "unix-file-copy-paste", target_os = "macos"))]
@@ -91,6 +200,18 @@ pub fn is_file_url_set_by_rustdesk(url: &Vec<String>) -> bool {
             false
         })
         .unwrap_or(false)
+}
+
+#[cfg(target_os = "windows")]
+pub fn clipboards_allowed(
+    clipboards: &[Clipboard],
+    filters: Option<&ClipboardRegexConfig>,
+) -> bool {
+    if filters.is_none() {
+        return true;
+    }
+    let data = proto::from_multi_clipbards(clipboards.to_vec());
+    should_allow_clipboard_text(&data, filters)
 }
 
 #[cfg(feature = "unix-file-copy-paste")]

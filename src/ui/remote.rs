@@ -17,6 +17,8 @@ use sciter::{
 use hbb_common::{
     allow_err, fs::TransferJobMeta, log, message_proto::*, rendezvous_proto::ConnType,
 };
+#[cfg(target_os = "windows")]
+use hbb_common::config::LocalConfig;
 
 use crate::{
     client::*,
@@ -566,6 +568,8 @@ impl sciter::EventHandler for SciterSession {
         fn has_file_clipboard();
         fn get_printer_names();
         fn on_printer_selected(i32, String, String);
+        fn get_clipboard_filters();
+        fn save_clipboard_filters(String, String);
     }
 }
 
@@ -679,6 +683,33 @@ impl SciterSession {
     fn has_file_clipboard(&self) -> bool {
         cfg!(any(target_os = "windows", feature = "unix-file-copy-paste"))
     }
+
+    #[cfg(target_os = "windows")]
+    fn get_clipboard_filters(&self) -> Value {
+        let overrides = self.lc.read().unwrap().clipboard_regex_overrides();
+        let mut values = Value::array(0);
+        values.push(overrides.0);
+        values.push(overrides.1);
+        values.push(LocalConfig::get_clipboard_allow_regex());
+        values.push(LocalConfig::get_clipboard_block_regex());
+        values
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn get_clipboard_filters(&self) -> Value {
+        Value::array(0)
+    }
+
+    #[cfg(target_os = "windows")]
+    fn save_clipboard_filters(&mut self, allow: String, block: String) {
+        self.lc
+            .write()
+            .unwrap()
+            .save_clipboard_regex_overrides(allow, block);
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn save_clipboard_filters(&mut self, _allow: String, _block: String) {}
 
     fn get_port_forwards(&mut self) -> Value {
         let port_forwards = self.lc.read().unwrap().port_forwards.clone();

@@ -83,6 +83,8 @@ use scrap::{
 use crate::clipboard::CLIPBOARD_INTERVAL;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::clipboard::{check_clipboard, ClipboardSide};
+#[cfg(target_os = "windows")]
+use crate::clipboard::ClipboardRegexConfig;
 #[cfg(not(feature = "flutter"))]
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::ui_session_interface::SessionPermissionConfig;
@@ -1128,7 +1130,22 @@ impl ClientClipboardHandler {
                 }
             }
 
-            if let Some(msg) = check_clipboard(&mut self.ctx, ClipboardSide::Client, false) {
+            #[cfg(target_os = "windows")]
+            let filters = self
+                .client_clip_ctx
+                .as_ref()
+                .and_then(|ctx| ctx.cfg.lc.read().ok())
+                .and_then(|handler| handler.clipboard_regex_config());
+            #[cfg(target_os = "windows")]
+            let msg = check_clipboard(
+                &mut self.ctx,
+                ClipboardSide::Client,
+                false,
+                filters.as_ref(),
+            );
+            #[cfg(not(target_os = "windows"))]
+            let msg = check_clipboard(&mut self.ctx, ClipboardSide::Client, false);
+            if let Some(msg) = msg {
                 if self.is_text_required() {
                     self.send_msg(msg, false);
                 }
@@ -1912,6 +1929,42 @@ impl LoginConfigHandler {
             return;
         }
         config.options.insert(k, v);
+        self.save_config(config);
+    }
+
+    #[cfg(target_os = "windows")]
+    pub fn clipboard_regex_config(&self) -> Option<ClipboardRegexConfig> {
+        let allow = if self.config.clipboard_allow_regex.is_empty() {
+            LocalConfig::get_clipboard_allow_regex()
+        } else {
+            self.config.clipboard_allow_regex.clone()
+        };
+        let block = if self.config.clipboard_block_regex.is_empty() {
+            LocalConfig::get_clipboard_block_regex()
+        } else {
+            self.config.clipboard_block_regex.clone()
+        };
+        ClipboardRegexConfig::from_patterns(allow, block)
+    }
+
+    #[cfg(target_os = "windows")]
+    pub fn clipboard_regex_overrides(&self) -> (String, String) {
+        (
+            self.config.clipboard_allow_regex.clone(),
+            self.config.clipboard_block_regex.clone(),
+        )
+    }
+
+    #[cfg(target_os = "windows")]
+    pub fn save_clipboard_regex_overrides(&mut self, allow: String, block: String) {
+        let mut config = self.load_config();
+        let allow = allow.trim().to_owned();
+        let block = block.trim().to_owned();
+        if config.clipboard_allow_regex == allow && config.clipboard_block_regex == block {
+            return;
+        }
+        config.clipboard_allow_regex = allow;
+        config.clipboard_block_regex = block;
         self.save_config(config);
     }
 

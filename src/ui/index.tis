@@ -400,6 +400,27 @@ function open_whitelist_dialog() {
             }, 300);
 }
 
+function open_clipboard_filters_dialog() {
+    var allow = handler.get_clipboard_allow_regex();
+    var block = handler.get_clipboard_block_regex();
+    msgbox("custom-clipboard-filters", translate("Clipboard text filters"), <div .form>
+            <div>{translate('Allow regex (leave empty to disable)')}:</div>
+            <input|text .outline-focus name='allow' value={allow} />
+            <div style="margin-top: 0.6em">{translate('Block regex (leave empty to disable)')}:</div>
+            <input|text .outline-focus name='block' value={block} />
+            <div style="margin-top: 0.6em; color: #888; font-size: 0.9em;">{translate('Patterns use Rust regular expressions')}</div>
+        </div>
+        , "", function(res=null, show_progress) {
+            if (!res) return;
+            if (typeof show_progress === 'function') show_progress();
+            var allow_pattern = (res.allow || "").trim();
+            var block_pattern = (res.block || "").trim();
+            handler.set_clipboard_allow_regex(allow_pattern);
+            handler.set_clipboard_block_regex(block_pattern);
+            if (typeof show_progress === 'function') show_progress(-1);
+        }, 320);
+}
+
 function open_proxy_dialog() {
     var is_opt_fixed = handler.is_option_fixed("proxy-url");
     var socks5 = handler.get_socks() || {};
@@ -476,6 +497,7 @@ class MyIdMenu: Reactor.Component {
                 {!disable_settings && <div .separator />}
                 {!disable_settings && !hide_server_settings && <li #custom-server>{translate('ID/Relay Server')}</li>}
                 {!disable_settings && <li #whitelist title={translate('whitelist_tip')}>{translate('IP Whitelisting')}</li>}
+                {!disable_settings && is_win ? <li #clipboard-filters>{translate('Clipboard text filters')}</li> : ""}
                 {!disable_settings && !hide_proxy_settings && <li #socks5-server>{translate('Socks5/Http(s) Proxy')}</li>}
                 {!disable_settings && !hide_websocket_settings && <li #allow-websocket><span>{svg_checkmark}</span>{translate('Use WebSocket')}</li>}
                 {!disable_settings && !using_public_server && !outgoing_only && <li #disable-udp class={disable_udp ? "selected" : "line-through"}><span>{svg_checkmark}</span>{translate('Disable UDP')}</li>}
@@ -536,6 +558,8 @@ class MyIdMenu: Reactor.Component {
                 // whitelist should be clickable even when fixed (to view the content)
                 // The dialog will show readonly textarea and no OK button when fixed
                 continue;
+            } else if (id == "clipboard-filters") {
+                continue;
             }
             if (is_opt_fixed) {
                 el.state.disabled = true;
@@ -571,6 +595,8 @@ class MyIdMenu: Reactor.Component {
         }
         if (me.id == "whitelist") {
             open_whitelist_dialog();
+        } else if (me.id == "clipboard-filters") {
+            open_clipboard_filters_dialog();
         } else if (me.id == "custom-server") {
             open_custom_server_dialog();
         } else if (me.id == "socks5-server") {

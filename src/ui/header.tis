@@ -216,7 +216,8 @@ class Header: Reactor.Component {
                 <li #show-quality-monitor .toggle-option><span>{svg_checkmark}</span>{translate('Show quality monitor')}</li> 
                 {audio_enabled ? <li #disable-audio .toggle-option><span>{svg_checkmark}</span>{translate('Mute')}</li> : ""}
                 {is_file_copy_paste_supported && file_enabled ? <li #enable-file-copy-paste .toggle-option><span>{svg_checkmark}</span>{translate('Enable file copy and paste')}</li> : ""}
-                {keyboard_enabled && clipboard_enabled ? <li #disable-clipboard .toggle-option><span>{svg_checkmark}</span>{translate('Disable clipboard')}</li> : ""} 
+                {keyboard_enabled && clipboard_enabled ? <li #disable-clipboard .toggle-option><span>{svg_checkmark}</span>{translate('Disable clipboard')}</li> : ""}
+                {is_win ? <li #clipboard-filters>{translate('Clipboard text filters')}</li> : ""}
                 {keyboard_enabled ? <li #lock-after-session-end .toggle-option><span>{svg_checkmark}</span>{translate('Lock after session end')}</li> : ""} 
                 {keyboard_enabled && pi.platform == "Windows" ? <li #privacy-mode><span>{svg_checkmark}</span>{translate('Privacy mode')}</li> : ""}
                 {keyboard_enabled && ((is_osx && pi.platform != "Mac OS") || (!is_osx && pi.platform == "Mac OS")) ? <li #allow_swap_key  .toggle-option><span>{svg_checkmark}</span>{translate('Swap control-command key')}</li> : ""}
@@ -407,7 +408,9 @@ class Header: Reactor.Component {
     }
 
     event click $(menu#display-options li) (_, me) {
-        if (me.id == "custom") {
+        if (me.id == "clipboard-filters") {
+            openClipboardFiltersDialog();
+        } else if (me.id == "custom") {
             handle_custom_image_quality();
         } else if (me.id == "privacy-mode") {
             togglePrivacyMode(me.id);
@@ -621,6 +624,32 @@ function toggleI444(name) {
     handler.toggle_option(name);
     handler.update_supported_decodings();
     toggleMenuState();
+}
+
+function openClipboardFiltersDialog() {
+    if (!is_win) return;
+    var filters = handler.get_clipboard_filters();
+    var overrideAllow = filters[0] || "";
+    var overrideBlock = filters[1] || "";
+    var defaultAllow = filters[2] || "";
+    var defaultBlock = filters[3] || "";
+    var displayDefaultAllow = defaultAllow ? defaultAllow : translate('None');
+    var displayDefaultBlock = defaultBlock ? defaultBlock : translate('None');
+    msgbox("custom-clipboard-filters", translate("Clipboard text filters"), <div .form>
+            <div>{translate('Override allow regex (leave empty to inherit)')}:</div>
+            <input|text .outline-focus name='allow' value={overrideAllow} />
+            <div style="margin-top: 0.6em">{translate('Override block regex (leave empty to inherit)')}:</div>
+            <input|text .outline-focus name='block' value={overrideBlock} />
+            <div style="margin-top: 0.6em; color: #888; font-size: 0.9em;">{translate('Defaults')}: {translate('Allow')} - {displayDefaultAllow}, {translate('Block')} - {displayDefaultBlock}</div>
+        </div>
+        , "", function(res=null, show_progress) {
+            if (!res) return;
+            if (typeof show_progress === 'function') show_progress();
+            var allowOverride = (res.allow || "").trim();
+            var blockOverride = (res.block || "").trim();
+            handler.save_clipboard_filters(allowOverride, blockOverride);
+            if (typeof show_progress === 'function') show_progress(-1);
+        }, 360);
 }
 
 handler.updateBlockInputState = function(input_blocked) {
