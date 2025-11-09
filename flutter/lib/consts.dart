@@ -105,6 +105,8 @@ const String kOptionEnableKeyboard = "enable-keyboard";
 // "Settings -> Security -> Permissions"
 const String kOptionEnableRemotePrinter = "enable-remote-printer";
 const String kOptionEnableClipboard = "enable-clipboard";
+const String kOptionClipboardAllowedSuffixes = "clipboard-allowed-suffixes";
+const String kOptionClipboardBlockedSuffixes = "clipboard-blocked-suffixes";
 const String kOptionEnableFileTransfer = "enable-file-transfer";
 const String kOptionEnableAudio = "enable-audio";
 const String kOptionEnableCamera = "enable-camera";

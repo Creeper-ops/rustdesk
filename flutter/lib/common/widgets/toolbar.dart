@@ -61,6 +61,143 @@ class TToggleMenu {
       {required this.child, required this.value, required this.onChanged});
 }
 
+bool clipboardSuffixPolicyVisible(FFI ffi) {
+  final ffiModel = ffi.ffiModel;
+  final pi = ffiModel.pi;
+  final perms = ffiModel.permissions;
+  if (ffi.connType != ConnType.defaultConn) return false;
+  if (!ffiModel.keyboard) return false;
+  if (perms['clipboard'] == false) return false;
+  if (pi.platform != kPeerPlatformWindows) return false;
+  final isSupportIfPeer123 =
+      versionCmp(pi.version, '1.2.4') < 0 && isWindows && pi.platform == kPeerPlatformWindows;
+  final isSupportIfPeer124 = versionCmp(pi.version, '1.2.4') >= 0 &&
+      bind.mainHasFileClipboard() &&
+      pi.platformAdditions.containsKey(kPlatformAdditionsHasFileClipboard);
+  return isSupportIfPeer123 || isSupportIfPeer124;
+}
+
+List<String> _parseClipboardSuffixInput(String text) {
+  final seen = <String>{};
+  final result = <String>[];
+  final parts = text.split(RegExp(r'[\s,;]+'));
+  for (final raw in parts) {
+    var item = raw.trim();
+    if (item.isEmpty) continue;
+    final isWildcard = item == '*';
+    if (!isWildcard) {
+      item = item.replaceFirst(RegExp(r'^\.+'), '');
+    }
+    if (item.isEmpty && !isWildcard) continue;
+    final normalized = isWildcard ? '*' : item.toLowerCase();
+    if (seen.add(normalized)) {
+      result.add(normalized);
+    }
+  }
+  return result;
+}
+
+String _clipboardSuffixesToText(String raw) {
+  if (raw.trim().isEmpty) {
+    return '';
+  }
+  final suffixes = _parseClipboardSuffixInput(raw);
+  return suffixes.join('\n');
+}
+
+String _suffixesToOptionValue(List<String> suffixes) => suffixes.join('\n');
+
+Future<void> showClipboardSuffixPolicyDialog(
+    BuildContext context, FFI ffi) async {
+  final sessionId = ffi.sessionId;
+  final allowedRaw = await bind.sessionGetPeerOption(
+      sessionId: sessionId, name: kOptionClipboardAllowedSuffixes);
+  final blockedRaw = await bind.sessionGetPeerOption(
+      sessionId: sessionId, name: kOptionClipboardBlockedSuffixes);
+  final allowedController =
+      TextEditingController(text: _clipboardSuffixesToText(allowedRaw));
+  final blockedController =
+      TextEditingController(text: _clipboardSuffixesToText(blockedRaw));
+
+  await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) {
+      final textTheme = Theme.of(dialogContext).textTheme;
+      return AlertDialog(
+        title: Text(translate('Clipboard file filter')),
+        content: SizedBox(
+          width: 420,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(translate('Allowed file suffixes')),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: allowedController,
+                  minLines: 4,
+                  maxLines: 6,
+                  keyboardType: TextInputType.multiline,
+                  decoration: const InputDecoration(
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(translate('Blocked file suffixes')),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: blockedController,
+                  minLines: 4,
+                  maxLines: 6,
+                  keyboardType: TextInputType.multiline,
+                  decoration: const InputDecoration(
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  '${translate('One suffix per line. Leave empty to allow all.')}\n${translate('Blocked files never leave this machine.')}',
+                  style: textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: Text(translate('Cancel')),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final allowedList =
+                  _parseClipboardSuffixInput(allowedController.text);
+              final blockedList =
+                  _parseClipboardSuffixInput(blockedController.text);
+              await bind.sessionPeerOption(
+                  sessionId: sessionId,
+                  name: kOptionClipboardAllowedSuffixes,
+                  value: _suffixesToOptionValue(allowedList));
+              await bind.sessionPeerOption(
+                  sessionId: sessionId,
+                  name: kOptionClipboardBlockedSuffixes,
+                  value: _suffixesToOptionValue(blockedList));
+              if (dialogContext.mounted) {
+                Navigator.of(dialogContext).pop(true);
+              }
+            },
+            child: Text(translate('Save')),
+          ),
+        ],
+      );
+    },
+  );
+
+  allowedController.dispose();
+  blockedController.dispose();
+}
+
 handleOsPasswordEditIcon(
     SessionID sessionId, OverlayDialogManager dialogManager) {
   isEditOsPassword = true;
