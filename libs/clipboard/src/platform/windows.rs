@@ -764,8 +764,36 @@ pub fn server_clip_file(
                 ret
             );
         }
-        ClipboardFile::Files { .. } => {
-            // unreachable
+        ClipboardFile::Files { files } => {
+            if files.is_empty() {
+                return 0;
+            }
+            if let Some((blocked_path, _)) = files
+                .iter()
+                .find(|(path, _)| !crate::is_clipboard_file_suffix_allowed(conn_id, path))
+            {
+                let name = std::path::Path::new(blocked_path)
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or(blocked_path);
+                let text = format!(
+                    "Clipboard transfer blocked for '{name}'. Blocked files never leave this machine."
+                );
+                log::info!(
+                    "server_clip_file: blocked clipboard file '{}' due to suffix policy",
+                    blocked_path
+                );
+                allow_err!(send_data(
+                    conn_id as _,
+                    ClipboardFile::NotifyCallback {
+                        r#type: "custom-warn-nocancel-nook-hasclose".to_string(),
+                        title: "Clipboard".to_string(),
+                        text,
+                    },
+                ));
+                return 0;
+            }
+            0
         }
     }
     ret
@@ -1044,6 +1072,7 @@ extern "C" fn handle_clipboard_files(
         let mut files = Vec::new();
         use std::ffi::OsString;
         use std::os::windows::ffi::OsStringExt;
+        let mut blocked_path: Option<String> = None;
         for i in 0..n_files {
             let file_name_ptr = *file_names.offset(i as isize);
             if !file_name_ptr.is_null() {
@@ -1057,7 +1086,12 @@ extern "C" fn handle_clipboard_files(
                     Some(n) => match std::fs::metadata(n) {
                         Ok(meta) => {
                             if meta.is_file() {
-                                files.push((n.to_owned(), meta.len()));
+                                if crate::is_clipboard_file_suffix_allowed(conn_id as _, n) {
+                                    files.push((n.to_owned(), meta.len()));
+                                } else {
+                                    blocked_path = Some(n.to_owned());
+                                    break;
+                                }
                             }
                         }
                         Err(e) => {
@@ -1073,6 +1107,31 @@ extern "C" fn handle_clipboard_files(
                     }
                 };
             }
+            if blocked_path.is_some() {
+                break;
+            }
+        }
+        if let Some(blocked) = blocked_path {
+            let name = std::path::Path::new(&blocked)
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or(&blocked);
+            let text = format!(
+                "Clipboard transfer blocked for '{name}'. Blocked files never leave this machine."
+            );
+            allow_err!(send_data(
+                conn_id as _,
+                ClipboardFile::NotifyCallback {
+                    r#type: "custom-warn-nocancel-nook-hasclose".to_string(),
+                    title: "Clipboard".to_string(),
+                    text,
+                }
+            ));
+            log::info!(
+                "handle_clipboard_files: blocked clipboard file '{}' due to suffix policy",
+                blocked
+            );
+            return 0;
         }
         if files.is_empty() {
             return 0;

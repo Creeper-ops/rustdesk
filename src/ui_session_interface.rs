@@ -358,6 +358,25 @@ impl<T: InvokeUiSession> Session<T> {
         self.lc.write().unwrap().save_edge_scroll_edge_thickness(value);
     }
 
+    pub fn get_clipboard_file_suffix_policy(&self) -> (Vec<String>, Vec<String>) {
+        let handler = self.lc.read().unwrap();
+        (
+            handler.clipboard_allowed_file_suffixes(),
+            handler.clipboard_blocked_file_suffixes(),
+        )
+    }
+
+    pub fn save_clipboard_file_suffix_policy(
+        &self,
+        allowed: Vec<String>,
+        blocked: Vec<String>,
+    ) {
+        self.lc
+            .write()
+            .unwrap()
+            .set_clipboard_file_suffix_policy(allowed, blocked);
+    }
+
     pub fn save_flutter_option(&self, k: String, v: String) {
         self.lc.write().unwrap().save_ui_flutter(k, v);
     }

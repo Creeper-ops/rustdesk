@@ -46,7 +46,7 @@ use std::{
     collections::HashMap,
     ffi::c_void,
     num::NonZeroI64,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc, RwLock,
@@ -211,6 +211,11 @@ impl<T: InvokeUiSession> Remote<T> {
                         });
                     };
                 }
+                #[cfg(target_os = "windows")]
+                {
+                    let mut handler = self.handler.lc.write().unwrap();
+                    handler.set_clipboard_conn_id(self.client_conn_id);
+                }
                 #[cfg(any(target_os = "windows", feature = "unix-file-copy-paste"))]
                 let mut rx_clip_client = rx_clip_client_holder.0.lock().await;
 
@@ -369,7 +374,7 @@ impl<T: InvokeUiSession> Remote<T> {
                 } => {
                     self.handler.msgbox(&r#type, &title, &text, "");
                 }
-                _ => {
+                mut clip => {
                     let is_stopping_allowed = clip.is_stopping_allowed();
                     let server_file_transfer_enabled =
                         *self.handler.server_file_transfer_enabled.read().unwrap();
@@ -395,6 +400,35 @@ impl<T: InvokeUiSession> Remote<T> {
                             log::error!("failed to restart clipboard context: {}", e);
                             // to-do: Show msgbox with "Don't show again" option
                         };
+                        #[cfg(target_os = "windows")]
+                        {
+                            if let clipboard::ClipboardFile::Files { ref files } = clip {
+                                if let Some((blocked_path, _)) = files
+                                    .iter()
+                                    .find(|(path, _)| {
+                                        !clipboard::is_clipboard_file_suffix_allowed(
+                                            self.client_conn_id,
+                                            path,
+                                        )
+                                    })
+                                {
+                                    let name = Path::new(blocked_path)
+                                        .file_name()
+                                        .and_then(|s| s.to_str())
+                                        .unwrap_or(blocked_path);
+                                    let text = format!(
+                                        "Clipboard transfer blocked for '{name}'. Blocked files never leave this machine."
+                                    );
+                                    self.handler.msgbox(
+                                        "custom-warn-nocancel-nook-hasclose",
+                                        "Clipboard",
+                                        &text,
+                                        "",
+                                    );
+                                    return;
+                                }
+                            }
+                        }
                         log::debug!("Send system clipboard message to remote");
                         let msg = crate::clipboard_file::clip_2_msg(clip);
                         allow_err!(peer.send(&msg).await);

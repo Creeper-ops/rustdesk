@@ -1314,6 +1314,18 @@ void showOptions(
         },
       ));
     }
+    if (clipboardSuffixPolicyVisible(gFFI)) {
+      popupDialogMenus.add(ListTile(
+        contentPadding: EdgeInsets.zero,
+        visualDensity: VisualDensity.compact,
+        title: Text(translate('Edit clipboard file suffixes')),
+        onTap: () {
+          close();
+          showClipboardSuffixPolicyDialog(context, gFFI)
+              .whenComplete(_disableAndroidSoftKeyboard);
+        },
+      ));
+    }
     if (popupDialogMenus.isNotEmpty) {
       popupDialogMenus.add(const Divider(color: MyTheme.border));
     }

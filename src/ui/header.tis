@@ -216,7 +216,10 @@ class Header: Reactor.Component {
                 <li #show-quality-monitor .toggle-option><span>{svg_checkmark}</span>{translate('Show quality monitor')}</li> 
                 {audio_enabled ? <li #disable-audio .toggle-option><span>{svg_checkmark}</span>{translate('Mute')}</li> : ""}
                 {is_file_copy_paste_supported && file_enabled ? <li #enable-file-copy-paste .toggle-option><span>{svg_checkmark}</span>{translate('Enable file copy and paste')}</li> : ""}
-                {keyboard_enabled && clipboard_enabled ? <li #disable-clipboard .toggle-option><span>{svg_checkmark}</span>{translate('Disable clipboard')}</li> : ""} 
+                {keyboard_enabled && clipboard_enabled ? <li #disable-clipboard .toggle-option><span>{svg_checkmark}</span>{translate('Disable clipboard')}</li> : ""}
+                {keyboard_enabled && clipboard_enabled && pi.platform == "Windows" && is_file_copy_paste_supported && file_enabled
+                    ? <li #edit-clipboard-suffixes>{translate('Edit clipboard file suffixes')}</li>
+                    : ""}
                 {keyboard_enabled ? <li #lock-after-session-end .toggle-option><span>{svg_checkmark}</span>{translate('Lock after session end')}</li> : ""} 
                 {keyboard_enabled && pi.platform == "Windows" ? <li #privacy-mode><span>{svg_checkmark}</span>{translate('Privacy mode')}</li> : ""}
                 {keyboard_enabled && ((is_osx && pi.platform != "Mac OS") || (!is_osx && pi.platform == "Mac OS")) ? <li #allow_swap_key  .toggle-option><span>{svg_checkmark}</span>{translate('Swap control-command key')}</li> : ""}
@@ -434,6 +437,10 @@ class Header: Reactor.Component {
     }
 
     event click $(menu#keyboard-options>li) (_, me) {
+        if (me.id == "edit-clipboard-suffixes") {
+            handle_clipboard_suffix_policy();
+            return;
+        }
         if (me.id == "legacy") {
             handler.save_keyboard_mode("legacy");
         } else if (me.id == "map") {
@@ -468,6 +475,49 @@ function handle_custom_image_quality() {
         handler.save_custom_image_quality(res.bitrate);
         toggleMenuState();
       });
+}
+
+function clipboardSuffixesToText(list) {
+    return list.join("\n");
+}
+
+function parseClipboardSuffixInput(text) {
+    var seen = {};
+    var result = [];
+    if (!text) return result;
+    var parts = text.split(/[\s,;]+/);
+    for (var i = 0; i < parts.length; ++i) {
+        var item = parts[i].trim();
+        if (!item.length) continue;
+        if (item != '*') {
+            item = item.replace(/^\.+/, '');
+        }
+        if (!item.length && item != '*') continue;
+        item = item.toLowerCase();
+        if (seen[item]) continue;
+        seen[item] = true;
+        result.push(item);
+    }
+    return result;
+}
+
+function handle_clipboard_suffix_policy() {
+    var policy = handler.get_clipboard_file_suffix_policy();
+    var allowed = clipboardSuffixesToText(policy[0]);
+    var blocked = clipboardSuffixesToText(policy[1]);
+    var content = "<div .form> " +
+        "<div><label>" + translate('Allowed file suffixes') + "</label>" +
+        "<textarea .outline-focus spellcheck=\"false\" name=\"allowed\" style=\"overflow: scroll-indicator; width:*; height: 80px; font-size: 1.2em; padding: 0.5em;\">" + allowed + "</textarea></div>" +
+        "<div><label>" + translate('Blocked file suffixes') + "</label>" +
+        "<textarea .outline-focus spellcheck=\"false\" name=\"blocked\" style=\"overflow: scroll-indicator; width:*; height: 80px; font-size: 1.2em; padding: 0.5em;\">" + blocked + "</textarea></div>" +
+        "<div .hint>" + translate('One suffix per line. Leave empty to allow all.') + "<br>" + translate('Blocked files never leave this machine.') + "</div>" +
+        "</div>";
+    msgbox("clipboard-file-filter", translate('Clipboard file filter'), content, "", function(res=null) {
+        if (!res || res.id) return;
+        var allowedList = parseClipboardSuffixInput(res.allowed || "");
+        var blockedList = parseClipboardSuffixInput(res.blocked || "");
+        handler.save_clipboard_file_suffix_policy(allowedList, blockedList);
+    });
 }
 
 function toggleMenuState() {

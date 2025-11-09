@@ -172,6 +172,18 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Accept and Elevate", "Accept and elevate"),
         ("accept_and_elevate_btn_tooltip", "Accept the connection and elevate UAC permissions."),
         ("clipboard_wait_response_timeout_tip", "Timed out waiting for copy response."),
+        ("Edit clipboard file suffixes", "Edit clipboard file suffixes"),
+        ("Clipboard file filter", "Clipboard file filter"),
+        ("Allowed file suffixes", "Allowed file suffixes"),
+        ("Blocked file suffixes", "Blocked file suffixes"),
+        (
+            "One suffix per line. Leave empty to allow all.",
+            "One suffix per line. Leave empty to allow all.",
+        ),
+        (
+            "Blocked files never leave this machine.",
+            "Blocked files never leave this machine.",
+        ),
         ("logout_tip", "Are you sure you want to log out?"),
         ("exceed_max_devices", "You have reached the maximum number of managed devices."),
         ("Change Password", "Change password"),

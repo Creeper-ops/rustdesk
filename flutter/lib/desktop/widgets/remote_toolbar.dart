@@ -1747,6 +1747,14 @@ class _KeyboardMenu extends StatelessWidget {
                 showMyCursor(),
               Divider(),
               ...toolbarToggles(),
+              if (clipboardSuffixPolicyVisible(ffi))
+                MenuButton(
+                  child: Text(translate('Edit clipboard file suffixes'))
+                      .paddingOnly(left: 26.0),
+                  onPressed: () =>
+                      showClipboardSuffixPolicyDialog(context, ffi),
+                  ffi: ffi,
+                ),
               ...mouseSpeed(),
               ...mobileActions(),
             ]);
